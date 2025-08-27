@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}AI Assistant{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .message-user {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .message-assistant {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        .loading-dots {
+            display: inline-block;
+        }
+        .loading-dots::after {
+            content: '';
+            animation: dots 1.5s steps(5, end) infinite;
+        }
+        @keyframes dots {
+            0%, 20% { content: ''; }
+            40% { content: '.'; }
+            60% { content: '..'; }
+            80%, 100% { content: '...'; }
+        }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body class="bg-gray-50 dark:bg-gray-900">
+    <div id="app" class="min-h-screen">
+        {% block content %}{% endblock %}
+    </div>
+    
+    <script>
+        // Initialize Telegram WebApp
+        window.Telegram.WebApp.ready();
+        window.Telegram.WebApp.expand();
+        
+        // Set theme
+        if (window.Telegram.WebApp.colorScheme === 'dark') {
+            document.documentElement.classList.add('dark');
+        }
+        
+        // Global API base URL
+        window.API_BASE = '{{ request.base_url }}api';
+        
+        // Global user info
+        window.USER_INFO = window.Telegram.WebApp.initDataUnsafe?.user || {};
+        
+        // Utility functions
+        window.utils = {
+            showAlert: function(message, type = 'info') {
+                window.Telegram.WebApp.showAlert(message);
+            },
+            
+            showConfirm: function(message) {
+                return window.Telegram.WebApp.showConfirm(message);
+            },
+            
+            showPopup: function(params) {
+                window.Telegram.WebApp.showPopup(params);
+            },
+            
+            close: function() {
+                window.Telegram.WebApp.close();
+            },
+            
+            // API request helper
+            apiRequest: async function(endpoint, options = {}) {
+                const url = `${window.API_BASE}${endpoint}`;
+                const defaultOptions = {
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                };
+                
+                try {
+                    const response = await fetch(url, { ...defaultOptions, ...options });
+                    
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.detail || 'API request failed');
+                    }
+                    
+                    return await response.json();
+                } catch (error) {
+                    console.error('API request failed:', error);
+                    throw error;
+                }
+            }
+        };
+    </script>
+    
+    {% block scripts %}{% endblock %}
+</body>
+</html>

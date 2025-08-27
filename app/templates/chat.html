@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+
+{% block title %}Чат - AI Assistant{% endblock %}
+
+{% block content %}
+<div class="flex flex-col h-screen bg-white dark:bg-gray-800">
+    <!-- Header -->
+    <div class="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-4 shadow-lg">
+        <div class="flex items-center justify-between">
+            <div>
+                <h1 class="text-xl font-bold">💬 AI Чат</h1>
+                <p class="text-sm opacity-90" id="quota-info">Загрузка...</p>
+            </div>
+            <div class="flex items-center space-x-2">
+                <select id="model-select" class="bg-white/20 text-white border border-white/30 rounded px-2 py-1 text-sm">
+                    <option value="gpt-4o-mini">GPT-4o Mini</option>
+                    <option value="gpt-4o">GPT-4o</option>
+                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                </select>
+                <button id="new-chat" class="bg-white/20 hover:bg-white/30 rounded p-2 transition-colors">
+                    🆕
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Messages Container -->
+    <div id="messages" class="flex-1 overflow-y-auto p-4 space-y-4">
+        <div class="text-center text-gray-500 dark:text-gray-400 py-8">
+            <div class="text-4xl mb-4">🤖</div>
+            <p>Начните диалог с AI-ассистентом</p>
+            <p class="text-sm mt-2">Задайте любой вопрос и получите умный ответ</p>
+        </div>
+    </div>
+
+    <!-- Input Area -->
+    <div class="border-t border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800">
+        <div class="flex items-end space-x-2">
+            <div class="flex-1">
+                <textarea 
+                    id="message-input" 
+                    placeholder="Введите ваше сообщение..."
+                    class="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                    rows="1"
+                    maxlength="4000"
+                ></textarea>
+                <div class="flex items-center justify-between mt-2 text-xs text-gray-500">
+                    <div class="flex items-center space-x-4">
+                        <label class="flex items-center">
+                            <input type="checkbox" id="stream-toggle" class="mr-1" checked>
+                            Стриминг
+                        </label>
+                        <select id="temperature" class="bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded px-2 py-1">
+                            <option value="0.3">Креативность: Низкая</option>
+                            <option value="0.7" selected>Креативность: Средняя</option>
+                            <option value="1.0">Креативность: Высокая</option>
+                        </select>
+                    </div>
+                    <span id="char-count">0/4000</span>
+                </div>
+            </div>
+            <button 
+                id="send-button" 
+                class="bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled
+            >
+                📤
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+class ChatApp {
+    constructor() {
+        this.currentDialogId = null;
+        this.isStreaming = false;
+        this.init();
+    }
+
+    async init() {
+        this.bindEvents();
+        await this.loadQuota();
+        this.autoResizeTextarea();
+    }
+
+    bindEvents() {
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+        const newChatButton = document.getElementById('new-chat');
+
+        messageInput.addEventListener('input', () => {
+            this.updateCharCount();
+            this.toggleSendButton();
+            this.autoResizeTextarea();
+        });
+
+        messageInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.sendMessage();
+            }
+        });
+
+        sendButton.addEventListener('click', () => this.sendMessage());
+        newChatButton.addEventListener('click', () => this.newChat());
+    }
+
+    updateCharCount() {
+        const input = document.getElementById('message-input');
+        const count = document.getElementById('char-count');
+        const length = input.value.length;
+        count.textContent = `${length}/4000`;
+        
+        if (length > 3500) {
+            count.classList.add('text-red-500');
+        } else {
+            count.classList.remove('text-red-500');
+        }
+    }
+
+    toggleSendButton() {
+        const input = document.getElementById('message-input');
+        const button = document.getElementById('send-button');
+        button.disabled = !input.value.trim() || this.isStreaming;
+    }
+
+    autoResizeTextarea() {
+        const textarea = document.getElementById('message-input');
+        textarea.style.height = 'auto';
+        textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+    }
+
+    async loadQuota() {
+        try {
+            const response = await window.utils.apiRequest('/chat/quota');
+            const quota = response.quota;
+            
+            document.getElementById('quota-info').textContent = 
+                `Осталось запросов: ${quota.remaining}`;
+        } catch (error) {
+            console.error('Failed to load quota:', error);
+        }
+    }
+
+    async sendMessage() {
+        const input = document.getElementById('message-input');
+        const message = input.value.trim();
+        
+        if (!message || this.isStreaming) return;
+
+        const model = document.getElementById('model-select').value;
+        const temperature = parseFloat(document.getElementById('temperature').value);
+        const useStreaming = document.getElementById('stream-toggle').checked;
+
+        this.isStreaming = true;
+        this.toggleSendButton();
+
+        // Add user message
+        this.addMessage('user', message);
+
+        // Clear input
+        input.value = '';
+        this.updateCharCount();
+        this.autoResizeTextarea();
+
+        // Add assistant message placeholder
+        const assistantMessageId = this.addMessage('assistant', '', true);
+
+        try {
+            if (useStreaming) {
+                await this.streamResponse(message, model, temperature, assistantMessageId);
+            } else {
+                await this.getResponse(message, model, temperature, assistantMessageId);
+            }
+        } catch (error) {
+            console.error('Failed to get response:', error);
+            this.updateMessage(assistantMessageId, '❌ Ошибка при получении ответа. Попробуйте еще раз.');
+            window.utils.showAlert('Ошибка при получении ответа');
+        } finally {
+            this.isStreaming = false;
+            this.toggleSendButton();
+            await this.loadQuota();
+        }
+    }
+
+    async streamResponse(message, model, temperature, messageId) {
+        const requestBody = {
+            message: message,
+            dialog_id: this.currentDialogId,
+            model: model,
+            temperature: temperature
+        };
+
+        try {
+            const response = await fetch(`${window.API_BASE}/chat/stream`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                throw new Error('Stream request failed');
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let content = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n');
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            
+                            if (data.chunk) {
+                                content += data.chunk;
+                                this.updateMessage(messageId, content);
+                            }
+                            
+                            if (data.done) {
+                                this.currentDialogId = data.dialog_id;
+                                return;
+                            }
+                            
+                            if (data.error) {
+                                throw new Error(data.error);
+                            }
+                        } catch (e) {
+                            // Ignore JSON parse errors
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    async getResponse(message, model, temperature, messageId) {
+        const requestBody = {
+            message: message,
+            dialog_id: this.currentDialogId,
+            model: model,
+            temperature: temperature
+        };
+
+        try {
+            const response = await window.utils.apiRequest('/chat/send', {
+                method: 'POST',
+                body: JSON.stringify(requestBody)
+            });
+
+            this.updateMessage(messageId, response.response);
+            this.currentDialogId = response.dialog_id;
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    addMessage(role, content, isLoading = false) {
+        const messagesContainer = document.getElementById('messages');
+        const messageId = 'msg-' + Date.now();
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.id = messageId;
+        messageDiv.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+        
+        const bubbleDiv = document.createElement('div');
+        bubbleDiv.className = `max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+            role === 'user' 
+                ? 'message-user text-white' 
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white'
+        }`;
+        
+        if (isLoading) {
+            bubbleDiv.innerHTML = '<span class="loading-dots">Генерация ответа</span>';
+        } else {
+            bubbleDiv.textContent = content;
+        }
+        
+        messageDiv.appendChild(bubbleDiv);
+        messagesContainer.appendChild(messageDiv);
+        
+        // Scroll to bottom
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        
+        return messageId;
+    }
+
+    updateMessage(messageId, content) {
+        const messageDiv = document.getElementById(messageId);
+        if (messageDiv) {
+            const bubbleDiv = messageDiv.querySelector('div');
+            bubbleDiv.textContent = content;
+            
+            // Scroll to bottom
+            const messagesContainer = document.getElementById('messages');
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+    }
+
+    newChat() {
+        this.currentDialogId = null;
+        document.getElementById('messages').innerHTML = `
+            <div class="text-center text-gray-500 dark:text-gray-400 py-8">
+                <div class="text-4xl mb-4">🤖</div>
+                <p>Новый диалог начат</p>
+                <p class="text-sm mt-2">Задайте любой вопрос и получите умный ответ</p>
+            </div>
+        `;
+    }
+}
+
+// Initialize app when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    new ChatApp();
+});
+</script>
+{% endblock %}
